@@ -34,3 +34,15 @@ func (s *Scm) Checkout(url, branch, dst string) (string, []string) {
 func (s *Scm) String() string {
 	return s.Name
 }
+
+func pathParts(depth int) func(string) string {
+	return func(path string) string {
+		parts := strings.Split(path, "/")
+
+		length := depth
+		if length > len(parts) {
+			length = len(parts)
+		}
+		return strings.Join(parts[:length], "/")
+	}
+}

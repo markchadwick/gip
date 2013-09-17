@@ -14,15 +14,13 @@ import (
 )
 
 type Path struct {
-	Root       string
-	downloaded map[string]int
-	installed  map[string]int
+	Root      string
+	installed map[string]int
 }
 
 func OpenPath() (*Path, error) {
 	p := &Path{
-		downloaded: make(map[string]int),
-		installed:  make(map[string]int),
+		installed: make(map[string]int),
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -37,6 +35,12 @@ func (p *Path) init() error {
 }
 
 func (p *Path) Install(pkg *Package) error {
+	if _, ok := p.installed[pkg.Path]; ok {
+		log.Printf("%s already installed", pkg.Path)
+		return nil
+	}
+	p.installed[pkg.Path] = 0
+
 	if err := p.download(pkg); err != nil {
 		return err
 	}
@@ -45,11 +49,6 @@ func (p *Path) Install(pkg *Package) error {
 }
 
 func (p *Path) install(pkg *Package) (err error) {
-	if _, ok := p.installed[pkg.Path]; ok {
-		log.Printf("%s already installed", pkg.Path)
-		return nil
-	}
-
 	for _, imprt := range p.imports(p.srcPath(pkg.Path)) {
 		log.Printf("%s ⇒ %s", pkg.Path, imprt)
 		dep, err := PackageFromImport(imprt)
@@ -61,48 +60,39 @@ func (p *Path) install(pkg *Package) (err error) {
 		}
 	}
 
-	err = p.build(pkg)
-
-	if err != nil {
-		p.installed[pkg.Path] = 0
-	}
-	return nil
+	return p.build(pkg)
 }
 
-// TODO adjust GOPATH
 func (p *Path) build(pkg *Package) error {
 	stderr := new(bytes.Buffer)
 	stdout := new(bytes.Buffer)
+	path := p.srcPath(pkg.Path)
 
 	cmd := exec.Command("go", "install")
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	pwd := []string{"PWD=" + p.srcPath(pkg.Path)}
-	cmd.Env = append(pwd, os.Environ()...)
-	log.Printf("exec: go install [%s]", p.srcPath(pkg.Path))
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Error running go install\n%s\n\nstdout:\n%s\nstderr:\n%s\n",
-			err.Error(), stdout.String(),
+	env := []string{
+		"PWD=" + path,
+		"GOPATH=" + p.Root,
+	}
+	cmd.Env = append(os.Environ(), env...)
+	log.Printf("exec: go install (in %s)", path)
+	if err := inDir(path, func() error { return cmd.Run() }); true {
+		return fmt.Errorf("Error running go install %s\n%s\n\nstdout:\n%s\nstderr:\n%s\n",
+			path,
+			err, stdout.String(),
 			stderr.String())
 	}
+
 	return nil
 }
 
 func (p *Path) download(pkg *Package) (err error) {
-	if _, ok := p.downloaded[pkg.Path]; ok {
-		log.Printf("%s already downloaded", pkg.Path)
-		return nil
-	}
-
 	stat, err := os.Stat(p.srcPath(pkg.Path))
 	if err == nil && stat.IsDir() {
 		err = p.update(pkg)
 	} else {
 		err = p.checkout(pkg)
-	}
-
-	if err != nil {
-		p.downloaded[pkg.Path] = 0
 	}
 	return nil
 }
